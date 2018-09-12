@@ -9,14 +9,18 @@ Kube network manager DB
 
 from cfgm_common.vnc_object_db import VncObjectDBClient, VncObjectEtcdClient
 
+DRIVER_CASS = 'cassandra'
+DRIVER_ETCD = 'etcd'
+
 
 class KubeNetworkManagerDB(object):
     def __init__(self, args, logger):
         self._db_logger = logger
-        if args.cassandra_server_list and not args.etcd_server:
-            self._cass_backend(args)
-        elif args.etcd_server and not args.cassandra_server_list:
-            self._etcd_backend(args)
+
+        if args.db_driver == DRIVER_CASS:
+            self._cass_driver(args)
+        elif args.db_driver == DRIVER_ETCD:
+            self._etcd_driver(args)
         else:
             msg = str("Contrail API server supports cassandra and etcd "
                       "backends, but neither of them have been configured.")
@@ -25,7 +29,7 @@ class KubeNetworkManagerDB(object):
     def __getattr__(self, name):
         return getattr(self._object_db, name)
 
-    def _cass_backend(self, args):
+    def _cass_driver(self, args):
         vnc_db = {
             'server_list': args.cassandra_server_list,
             'db_prefix': args.cluster_id,
@@ -37,11 +41,12 @@ class KubeNetworkManagerDB(object):
                                     'password': args.cassandra_password}
         self._object_db = VncObjectDBClient(**vnc_db)
 
-    def _etcd_backend(self, args):
+    def _etcd_driver(self, args):
         server = args.etcd_server.split(':')
         vnc_db = {
             'host': server[0],
             'port': server[1],
+            'prefix': args.etcd_prefix,
             'logger': self._db_logger.log,
         }
         if args.etcd_user and args.etcd_password:

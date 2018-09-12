@@ -576,16 +576,7 @@ class VncApiServer(object):
             msg = "Job Input %s " % json.dumps(request_params)
             self.config_log(msg, level=SandeshLevel.SYS_NOTICE)
 
-            device_list = self.validate_execute_job_input_params(
-                request_params)
-
-            # TODO - pass the job manager config file from api server config
-
-            # read the device object and pass the necessary data to the job
-            if device_list:
-                self.read_device_data(device_list, request_params)
-            else:
-                self.read_fabric_data(request_params)
+            fabric_job_uve_name = ''
 
             # generate the job execution id
             execution_id = uuid.uuid4()
@@ -602,41 +593,55 @@ class VncApiServer(object):
                         }
             request_params['args'] = json.dumps(job_args)
 
-            fabric_job_name = request_params.get('job_template_fq_name')
-            fabric_job_name.insert(0, request_params.get('fabric_fq_name'))
-            fabric_job_uve_name = ':'.join(map(str, fabric_job_name))
+            is_delete = request_params.get('input').get('is_delete')
 
-            # create job manager fabric execution status uve
-            if request_params.get('fabric_fq_name') is not "__DEFAULT__":
-                job_execution_data = FabricJobExecution(
-                    name=fabric_job_uve_name,
-                    execution_id=request_params.get('job_execution_id'),
-                    job_start_ts=int(round(time.time() * 1000)),
-                    job_status="STARTING",
-                    percentage_completed=0.0
-                )
+            device_list = self.validate_execute_job_input_params(
+                    request_params)
 
-                job_execution_uve = FabricJobUve(data=job_execution_data,
-                                                 sandesh=self._sandesh)
-                job_execution_uve.send(sandesh=self._sandesh)
+            if is_delete is None or is_delete == False:
+                # TODO - pass the job manager config file from api server config
 
-            if device_list:
-                for device_id in device_list:
-                    device_fqname = request_params.get(
-                        'device_json').get(device_id).get('device_fqname')
-                    device_fqname = ':'.join(map(str, device_fqname))
-                    prouter_uve_name = device_fqname + ":" + \
-                        fabric_job_uve_name
+                # read the device object and pass the necessary data to the job
+                if device_list:
+                    self.read_device_data(device_list, request_params)
+                else:
+                    self.read_fabric_data(request_params)
 
-                    prouter_job_data = PhysicalRouterJobExecution(
-                        name=prouter_uve_name,
+                fabric_job_name = request_params.get('job_template_fq_name')
+                fabric_job_name.insert(0, request_params.get('fabric_fq_name'))
+                fabric_job_uve_name = ':'.join(map(str, fabric_job_name))
+
+                # create job manager fabric execution status uve
+                if request_params.get('fabric_fq_name') is not "__DEFAULT__":
+                    job_execution_data = FabricJobExecution(
+                        name=fabric_job_uve_name,
                         execution_id=request_params.get('job_execution_id'),
-                        job_start_ts=int(round(time.time() * 1000))
+                        job_start_ts=int(round(time.time() * 1000)),
+                        job_status="STARTING",
+                        percentage_completed=0.0
                     )
 
-                    prouter_job_uve = PhysicalRouterJobUve(
-                        data=prouter_job_data, sandesh=self._sandesh)
-                    prouter_job_uve.send(sandesh=self._sandesh)
+                    job_execution_uve = FabricJobUve(data=job_execution_data,
+                                                     sandesh=self._sandesh)
+                    job_execution_uve.send(sandesh=self._sandesh)
+
+                if device_list:
+                    for device_id in device_list:
+                        device_fqname = request_params.get(
+                            'device_json').get(device_id).get('device_fqname')
+                        device_fqname = ':'.join(map(str, device_fqname))
+                        prouter_uve_name = device_fqname + ":" + \
+                            fabric_job_uve_name
+
+                        prouter_job_data = PhysicalRouterJobExecution(
+                            name=prouter_uve_name,
+                            execution_id=request_params.get('job_execution_id'),
+                            job_start_ts=int(round(time.time() * 1000))
+                        )
+
+                        prouter_job_uve = PhysicalRouterJobUve(
+                            data=prouter_job_data, sandesh=self._sandesh)
+                        prouter_job_uve.send(sandesh=self._sandesh)
 
             start_time = time.time()
             signal_var = {
@@ -4869,7 +4874,7 @@ class VncApiServer(object):
                 except NoIdError:
                     # No original version found, new resource created
                     uuid = None
-                self._holding_backrefs(held_refs, scope_type,
+                self._holding_backrefs(updates, held_refs, scope_type,
                                        r_class.object_type, fq_name, draft)
                 # Purge pending resource as we re-use the same UUID
                 self.internal_request_delete(r_class.object_type,
@@ -4948,8 +4953,8 @@ class VncApiServer(object):
                     ep['address_group'] = ':'.join(parent_fq_name + [
                         ag_fq_name.split(':')[-1]])
 
-    def _holding_backrefs(self, held_refs, scope_type, obj_type, fq_name,
-                          obj_dict):
+    def _holding_backrefs(self, updates, held_refs, scope_type, obj_type,
+                          fq_name, obj_dict):
         backref_fields = {'%s_back_refs' % t for t in SECURITY_OBJECT_TYPES}
         if (scope_type == GlobalSystemConfig().object_type and
                 obj_dict['draft_mode_state'] != 'deleted'):
@@ -4967,14 +4972,41 @@ class VncApiServer(object):
                         obj_type,
                         ref_uuid=obj_dict['uuid'],
                     )
-                    held_refs.append(
-                        ((backref_type, backref['uuid'], 'ADD', obj_type),
-                         {
-                             'ref_fq_name': fq_name,
-                             'attr': backref.get('attr')
-                         }
+                    if obj_type == AddressGroup.object_type:
+                        # Is not allowed to directly create Address Group
+                        # reference to a Firewall Rule, use its endpoints
+                        # address-group property
+                        backref_class = self.get_resource_class(backref_type)
+                        ok, result = backref_class.locate(
+                            backref['to'],
+                            backref['uuid'],
+                            create_it=False,
+                            fields=['endpoint_1', 'endpoint_2'])
+                        if not ok:
+                            msg = ("Cannot read Firewall Rule %s (%s)" %
+                                   (backref['to'], backref['uuid']))
+                            raise cfgm_common.exceptions.HttpError(400, msg)
+                        fr = result
+                        for ep_type in ['endpoint_1', 'endpoint_2']:
+                            if (ep_type in fr and
+                                    fr[ep_type].get('address_group', '').split(
+                                        ':') == obj_dict['fq_name']):
+                                ept = FirewallRuleEndpointType(
+                                    address_group=':'.join(fq_name))
+                                updates.append(
+                                    ('update',
+                                     (FirewallRule.resource_type, fr['uuid'],
+                                      {ep_type: vars(ept)})))
+                                break
+                    else:
+                        held_refs.append(
+                            ((backref_type, backref['uuid'], 'ADD', obj_type),
+                            {
+                                'ref_fq_name': fq_name,
+                                'attr': backref.get('attr')
+                            }
+                            )
                         )
-                    )
                     obj_dict[backref_field].remove(backref)
 
     def _security_discard_resources(self, pm):

@@ -46,6 +46,10 @@ class AnsibleConf(AnsibleBase):
         return False
     # end retry
 
+    def push_in_progress(self):
+        return self.push_config_state == PushConfigState.PUSH_STATE_INIT
+    # end push_in_progress
+
     def is_connected(self):
         return True
     # end is_connected
@@ -75,6 +79,8 @@ class AnsibleConf(AnsibleBase):
         self.system_config.set_product_name(self.physical_router.product)
         self.system_config.set_device_family(self.physical_router.device_family)
         self.system_config.set_management_ip(self.physical_router.management_ip)
+        self.system_config.set_encapsulation_priorities(
+            GlobalVRouterConfigDM.global_encapsulation_priorities)
         self.system_config.set_physical_role(
             self.physical_router.physical_router_role)
         self.system_config.set_routing_bridging_roles(
@@ -267,8 +273,6 @@ class AnsibleConf(AnsibleBase):
         job_input = {
             'device_abstract_config': self.export_dict(config),
             'additional_feature_params': feature_params,
-            'fabric_uuid': self.physical_router.fabric,
-            'push_mode': PushConfigState.is_push_mode_ansible(),
             'is_delete': is_delete
         }
         return self.device_send(job_template, job_input, is_delete, retry)
@@ -434,7 +438,7 @@ class AnsibleConf(AnsibleBase):
                                                  self.physical_router.name)
             return False
         bgp_router = BgpRouterDM.get(self.physical_router.bgp_router)
-        if not bgp_router.params or not bgp_router.params.get("address"):
+        if not bgp_router or not bgp_router.params or not bgp_router.params.get("address"):
             self._logger.info("bgp router parameters not configured for pr: " + \
                                                  bgp_router.name)
             return False
