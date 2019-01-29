@@ -2435,11 +2435,12 @@ class DeviceManagerDBMixin(object):
     # end populate_pr_map
 
     def add_to_pr_map(self, pr_uuid, vn_subnet, ip_used_for):
-          if pr_uuid in self.pr_vn_ip_map:
-              self.pr_vn_ip_map[pr_uuid].add((vn_subnet, ip_used_for))
-          else:
-              self.pr_vn_ip_map[pr_uuid] = set()
-              self.pr_vn_ip_map[pr_uuid].add((vn_subnet, ip_used_for))
+        if pr_uuid in self.pr_vn_ip_map:
+            self.pr_vn_ip_map[pr_uuid].add((vn_subnet, ip_used_for))
+        else:
+            self.pr_vn_ip_map[pr_uuid] = set()
+            self.pr_vn_ip_map[pr_uuid].add((vn_subnet, ip_used_for))
+
     # end add_to_pr_map
 
     def get_pr_vn_set(self, pr_uuid):

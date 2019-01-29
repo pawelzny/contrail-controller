@@ -23,7 +23,6 @@ from cfgm_common.vnc_amqp import VncAmqpHandle
 from vnc_api import vnc_api
 
 
-
 def etcd_args(args):
     vnc_db = {
         'host': args.etcd_server,
